@@ -1,6 +1,5 @@
 library(tidyverse)
 library(metill)
-library(jsonlite)
 library(ggh4x)
 library(ggtext)
 library(glue)
@@ -12,8 +11,6 @@ colour_einst_fleir <- "#d95f02"
 colour_log_ein <- "#7570b3"
 colour_log_fleir <- "#e7298a"
 
-url <- "https://talnaefni.fasteignaskra.is/talnaefni/v1/eignarhaldibuda"
-
 
 caption <- str_c(
   "Mynd eftir @bggjonsson hjá metill.is byggð á gögnum fasteignaskrár um eignarhald fasteigna\n",
@@ -21,7 +18,7 @@ caption <- str_c(
 )
 
 p <- read_csv("data/data.csv") |> 
-  filter(tegund == "fjoldi") |> 
+  filter(tegund == "fjoldi", date < 2024) |> 
   mutate(
     total = sum(value),
     .by = date
@@ -32,11 +29,15 @@ p <- read_csv("data/data.csv") |>
     .by = c(fjoldi, eigandi)
   ) |> 
   mutate(
-    p_diff = diff / diff_total
+    diff_total2 = diff_total + sum(pmax(-diff, 0)),
+    .by = date
+  ) |> 
+  mutate(
+    p_diff = diff / diff_total2
   ) |> 
   drop_na() |> 
   mutate(
-    group = str_c(eigandi, "\n",fjoldi),
+    group = str_c(eigandi, "\n", str_to_lower(fjoldi)),
     group2 = group,
     colour = case_when(
       (fjoldi == "Sem eiga eina íbúð") & (eigandi == "Einstaklingar") ~ colour_einst_ein,
@@ -45,31 +46,46 @@ p <- read_csv("data/data.csv") |>
       (fjoldi != "Sem eiga eina íbúð") & (eigandi != "Einstaklingar") ~ colour_log_fleir
     )
   ) |> 
-  filter(date >= 1996) |>
+  filter(date >= 1995) |>
   mutate(
-    label = glue(
-      str_c(
-        "Í kjölfar fjármálahrunsins fækkaði<br>",
-        "<span style='color:{colour_einst_ein};'>einstaklingum sem áttu eina íbúð</span>",  
-        " en<br>",
-        "<span style='color:{colour_einst_fleir};'>einstaklingum sem áttu fleiri en eina íbúð</span><br>",
-        "fjölgaði."
-      )
+    label = case_when(
+      (fjoldi == "Sem eiga fleiri en eina íbúð") & (eigandi == "Einstaklingar") ~ glue(
+        str_c(
+          "Árin 2009 og 2010 fækkaði íbúðum í eigu<br>",
+          "<span style='color:{colour_einst_ein};'>einstaklinga sem áttu eina íbúð</span>",  
+          " en<br>fjölgaði meðal ",
+          "<span style='color:{colour_einst_fleir};'>einstaklinga sem áttu<br>fleiri en eina íbúð</span><br>"
+        )
+      ),
+      (fjoldi != "Sem eiga fleiri en eina íbúð") & (eigandi == "Einstaklingar") ~ glue(
+        str_c(
+          "Almennt eru flestar eignir keyptar af<br>",
+          "<span style='color:{colour_einst_ein};'>einstaklingum sem eiga eina íbúð</span>"
+        )
+      ),
+      (fjoldi == "Sem eiga fleiri en eina íbúð") & (eigandi != "Einstaklingar") ~ glue(
+        str_c(
+          "Á árunum eftir fjármálahrunið keyptu<br>",
+          "<span style='color:{colour_log_fleir};'>lögaðilar sem eiga fleiri en eina íbúð</span><br>",
+          "fleiri íbúðir en annars"
+        )
+      ),
+      TRUE ~ NA_character_
     ),
     label = if_else(
-      (fjoldi == "Sem eiga fleiri en eina íbúð") & (eigandi == "Einstaklingar") & (date == 2011),
+      (date == 2011),
       label,
       NA_character_
     ),
     y_lower = if_else(
       fjoldi == "Sem eiga eina íbúð",
-      -1.1,
-      -0.6
+      -0.1,
+      -0.33
     ),
     y_upper = if_else(
       fjoldi == "Sem eiga eina íbúð",
-      1.4,
-      1.05
+      1,
+      1
     )
   ) |> 
   group_by(group2) |> 
@@ -82,13 +98,25 @@ p <- read_csv("data/data.csv") |>
           alpha = 0.7
         ) +
         geom_segment(
-          data = tibble(x = 1996 - 0.4, xend = 2024 + 0.4, y = 0, yend = 0),
+          data = tibble(x = 1995 - 0.4, xend = 2023 + 0.4, y = 0, yend = 0),
           aes(x = x, xend = xend, y = y, yend = yend),
           lty = 1,
-          alpha = 0.4
+          alpha = 1,
+          linewidth = 0.4
         ) +
         geom_richtext(
-          aes(x = 2010.7, y = 1.405, label = label),
+          data = ~ filter(.x, (fjoldi != "Sem eiga fleiri en eina íbúð") & (eigandi == "Einstaklingar")),
+          aes(x = 2023.5, y = 0.8, label = label),
+          hjust = 1,
+          vjust = 0.5,
+          fill = NA,
+          label.colour = NA,
+          family = "Lato",
+          fontface = "bold"
+        ) +
+        geom_richtext(
+          data = ~ filter(.x, (fjoldi == "Sem eiga fleiri en eina íbúð") & (eigandi == "Einstaklingar")),
+          aes(x = 2010.7, y = 0.66, label = label),
           hjust = 0,
           vjust = 0.5,
           fill = NA,
@@ -96,8 +124,18 @@ p <- read_csv("data/data.csv") |>
           family = "Lato",
           fontface = "bold"
         ) +
+        geom_richtext(
+          data = ~ filter(.x, (fjoldi == "Sem eiga fleiri en eina íbúð") & (eigandi != "Einstaklingar")),
+          aes(x = 2021.2, y = 0.7, label = label),
+          hjust = 1,
+          vjust = 0.5,
+          fill = NA,
+          label.colour = NA,
+          family = "Lato",
+          fontface = "bold"
+        ) +
         scale_x_continuous(
-          breaks = seq(1996, 2024, by = 2),
+          breaks = seq(1995, 2023, by = 2),
           guide = guide_axis_truncated(),
           expand = expansion(0.02)
         ) +
@@ -116,7 +154,8 @@ p <- read_csv("data/data.csv") |>
           legend.position = "none",
           panel.spacing.x = unit(0.4, "cm"),
           panel.spacing.y = unit(0.05, "cm"),
-          panel.background = element_blank()
+          panel.background = element_blank(),
+          plot.background = element_blank()
         ) +
         labs(
           x = NULL,
@@ -139,17 +178,17 @@ p <- read_csv("data/data.csv") |>
     AC
     BD
     ",
-    heights = c(2.5, 1.65)
+    heights = c(1, 1)
   ) +
   plot_annotation(
-    title = "Tilfærslur á fasteignum milli mismunandi eignarhaldshópa",
+    title = "Hver kaupa nýjar íbúðir og gamlar?",
     subtitle = str_c(
-      "Reiknað sem árleg breyting í eignarhaldi hvers undirhóps deild með árlegri breytingu í heildarfjölda íbúða",
-      " | ",
-      "Ef eignum fækkar í undirhóp eitthvert árið\ngetur samanlagt hlutfall allra hópanna verið hærra en 100%"
+      "Reiknað sem árleg breyting í eignarhaldi hvers undirhóps deilt með árlegri breytingu í heildarfjölda nýrra íbúða og þeim sem seljast á milli hópanna"
     ),
     caption = caption
   )
+
+p
 
 
 ggsave(
